@@ -5,6 +5,20 @@ import JRCore
 
 public enum EditMode: String, Sendable { case patch, merge, diff }
 
+public enum JRClientError: Error, LocalizedError, Sendable {
+    case invalidResponse
+    case httpStatus(Int)
+
+    public var errorDescription: String? {
+        switch self {
+        case .invalidResponse:
+            return "The service returned an invalid response."
+        case .httpStatus(let status):
+            return "The service returned HTTP \(status)."
+        }
+    }
+}
+
 public func buildUserPrompt(prompt: String, currentSpec: Spec? = nil, state: [String: JSONValue]? = nil, editModes: [EditMode] = [.patch], maxLength: Int = 4000) -> String {
     var p = prompt
     if p.count > maxLength { p = String(p.prefix(maxLength)) }
@@ -51,10 +65,13 @@ public final class OpenAIStreamClient: Sendable {
             "messages": [["role": "system", "content": system], ["role": "user", "content": user]],
         ]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (bytes, _) = try await URLSession.shared.bytes(for: req)
+        let (bytes, response) = try await URLSession.shared.bytes(for: req)
+        guard let http = response as? HTTPURLResponse else { throw JRClientError.invalidResponse }
+        guard (200...299).contains(http.statusCode) else { throw JRClientError.httpStatus(http.statusCode) }
         let compiler = SpecStreamCompiler()
         var acc = ""
         for try await line in bytes.lines {
+            try Task.checkCancellation()
             // SSE: data: {...}
             guard line.hasPrefix("data:") else { continue }
             let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
@@ -104,8 +121,24 @@ public struct JevConfig: Sendable {
     public var apiKey: String
     public var model: String
     public var baseURL: URL
-    public init(apiKey: String, model: String = "typesafe-ai/jev", baseURL: URL = URL(string: "https://gateway.example.com")!) {
-        self.apiKey = apiKey; self.model = model; self.baseURL = baseURL
+    public var maxSteps: Int
+    public var maxElements: Int
+    public var maxDepth: Int
+
+    public init(
+        apiKey: String,
+        model: String = "typesafe-ai/jev",
+        baseURL: URL,
+        maxSteps: Int = 8,
+        maxElements: Int = 80,
+        maxDepth: Int = 8
+    ) {
+        self.apiKey = apiKey
+        self.model = model
+        self.baseURL = baseURL
+        self.maxSteps = max(1, maxSteps)
+        self.maxElements = max(1, maxElements)
+        self.maxDepth = max(1, maxDepth)
     }
 }
 
@@ -121,23 +154,58 @@ public final class JevClient: Sendable {
         req.httpMethod = "POST"
         req.setValue("Bearer \(config.apiKey)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let payload: [String: Any] = [
+        let availableCandidates = candidates.isEmpty ? jevCandidates(from: catalog) : candidates
+        var payload: [String: Any] = [
             "model": config.model,
             "prompt": prompt,
-            "candidates": (try? JSONEncoder().encode(candidates)).flatMap { try? JSONSerialization.jsonObject(with: $0) } ?? [],
+            "candidates": (try? JSONEncoder().encode(availableCandidates)).flatMap { try? JSONSerialization.jsonObject(with: $0) } ?? [],
             "initialState": (try? JSONEncoder().encode(initialState)).flatMap { try? JSONSerialization.jsonObject(with: $0) } ?? [:],
+            "maxSteps": config.maxSteps,
+            "maxElements": config.maxElements,
+            "maxDepth": config.maxDepth,
         ]
+        if let initialSpec,
+           let encoded = try? JSONEncoder().encode(initialSpec),
+           let value = try? JSONSerialization.jsonObject(with: encoded) {
+            payload["initialSpec"] = value
+        }
         req.httpBody = try JSONSerialization.data(withJSONObject: payload)
-        let (data, _) = try await URLSession.shared.data(for: req)
-        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let specObj = obj["spec"] else {
+        let (data, response) = try await URLSession.shared.data(for: req)
+        try Task.checkCancellation()
+        guard let http = response as? HTTPURLResponse else { throw JRClientError.invalidResponse }
+        guard (200...299).contains(http.statusCode) else { throw JRClientError.httpStatus(http.statusCode) }
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return (initialSpec, .unavailable)
         }
-        let specData = try JSONSerialization.data(withJSONObject: specObj)
-        if let spec = try? JSONDecoder().decode(Spec.self, from: specData) {
-            onStep(spec)
-            return (spec, .finish)
+
+        let stopValue = obj["stop"] as? String ?? obj["stop_reason"] as? String
+        if stopValue == "limit" { return (initialSpec, .limit) }
+        if stopValue == "unavailable" { return (initialSpec, .unavailable) }
+        guard let specObject = obj["spec"] else { return (initialSpec, .unavailable) }
+        let specData = try JSONSerialization.data(withJSONObject: specObject)
+        guard let spec = try? JSONDecoder().decode(Spec.self, from: specData) else {
+            return (initialSpec, .unavailable)
         }
-        return (initialSpec, .unavailable)
+        onStep(spec)
+        return (spec, .finish)
+    }
+}
+
+public func jevCandidates(from catalog: Catalog) -> [JevCandidate] {
+    catalog.componentNames.map { name in
+        let definition = catalog.components[name]
+        let isRoot = ["VStack", "HStack", "ZStack", "Grid", "Card", "ScrollView"].contains(name)
+        let element = UIElement(
+            type: name,
+            props: name == "Text" ? ["content": .string("")] : [:]
+        )
+        return JevCandidate(
+            id: name,
+            description: definition?.description ?? name,
+            element: element,
+            root: isRoot,
+            maxUses: isRoot ? 1 : nil,
+            resource: nil
+        )
     }
 }
