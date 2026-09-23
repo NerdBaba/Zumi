@@ -23,7 +23,7 @@ public struct Registry {
 }
 
 public func defineRegistry(_ catalog: Catalog, _ builders: [String: JRComponent]) -> Registry {
-    Registry(builders)
+    Registry(builders.filter { catalog.components[$0.key] != nil })
 }
 
 // MARK: - Action execution
@@ -146,44 +146,149 @@ public func zumiStandardRegistry(store: StateStore, dispatcher: ActionDispatcher
         return fallback
     }
 
+    func number(_ context: ComponentContext, _ key: String, default fallback: Double) -> Double {
+        context.resolved[key]?.value.doubleValue ?? fallback
+    }
+    func verticalAlignment(_ raw: String?) -> VerticalAlignment {
+        switch raw {
+        case "top": return .top
+        case "bottom": return .bottom
+        case "firstTextBaseline": return .firstTextBaseline
+        case "lastTextBaseline": return .lastTextBaseline
+        default: return .center
+        }
+    }
+    func horizontalAlignment(_ raw: String?) -> HorizontalAlignment {
+        switch raw {
+        case "leading": return .leading
+        case "trailing": return .trailing
+        default: return .center
+        }
+    }
+    func alignment(_ raw: String?) -> Alignment {
+        switch raw {
+        case "top": return .top
+        case "bottom": return .bottom
+        case "leading": return .leading
+        case "trailing": return .trailing
+        case "topLeading": return .topLeading
+        case "topTrailing": return .topTrailing
+        case "bottomLeading": return .bottomLeading
+        case "bottomTrailing": return .bottomTrailing
+        default: return .center
+        }
+    }
+
     var m: [String: JRComponent] = [:]
-    m["VStack"] = { c in AnyView(VStack(spacing: 8) { c.children }) }
-    m["HStack"] = { c in AnyView(HStack(spacing: 8) { c.children }) }
-    m["ZStack"] = { c in AnyView(ZStack { c.children }) }
+    m["VStack"] = { c in
+        let spacing = max(0, number(c, "spacing", default: 8))
+        let padding = max(0, number(c, "padding", default: 0))
+        let stack = VStack(alignment: horizontalAlignment(c.resolved["alignment"]?.value.stringValue), spacing: spacing) { c.children }
+        return AnyView(stack.padding(padding))
+    }
+    m["HStack"] = { c in
+        let spacing = max(0, number(c, "spacing", default: 8))
+        let padding = max(0, number(c, "padding", default: 0))
+        let stack = HStack(alignment: verticalAlignment(c.resolved["alignment"]?.value.stringValue), spacing: spacing) { c.children }
+        return AnyView(stack.padding(padding))
+    }
+    m["ZStack"] = { c in
+        let stack = ZStack(alignment: alignment(c.resolved["alignment"]?.value.stringValue)) { c.children }
+        return AnyView(stack.padding(max(0, number(c, "padding", default: 0))))
+    }
     m["Grid"] = { c in
-        let cols = Int(c.props["columns"]?.intValue ?? 2)
-        return AnyView(LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: max(1, cols)), spacing: 12) { c.children })
+        let columns = max(1, Int(number(c, "columns", default: 2)))
+        let spacing = max(0, number(c, "spacing", default: 12))
+        return AnyView(LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: columns), spacing: spacing) { c.children })
     }
     m["Card"] = { c in
         let title = c.resolved["title"]?.value.stringValue ?? ""
-        return AnyView(GroupBox(title.isEmpty ? "" : title) { VStack(alignment: .leading, spacing: 8) { c.children } })
+        let subtitle = c.resolved["subtitle"]?.value.stringValue
+        return AnyView(GroupBox {
+            VStack(alignment: .leading, spacing: 8) {
+                if let header = c.slots["header"] { header }
+                c.children
+                if let footer = c.slots["footer"] { footer }
+            }
+        } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                if let subtitle, !subtitle.isEmpty { Text(subtitle).font(.caption).foregroundColor(.secondary) }
+            }
+        })
     }
     m["Section"] = { c in
-        let h = c.resolved["header"]?.value.stringValue ?? ""
-        return AnyView(Section(header: Text(h)) { c.children })
+        let header = c.resolved["header"]?.value.stringValue ?? ""
+        return AnyView(Section {
+            c.children
+            if let footer = c.slots["footer"] { footer }
+        } header: {
+            if let customHeader = c.slots["header"] { customHeader }
+            else { Text(header) }
+        })
     }
     m["Form"] = { c in AnyView(Form { c.children }) }
     m["Tabs"] = { c in AnyView(TabView { c.children }) }
     m["List"] = { c in AnyView(List { c.children }) }
     m["Table"] = { c in AnyView(VStack(alignment: .leading, spacing: 4) { c.children }) }
-    m["ScrollView"] = { c in AnyView(ScrollView { c.children }) }
-    m["Text"] = { c in AnyView(Text(c.resolved["content"]?.value.stringValue ?? c.resolved["text"]?.value.stringValue ?? "")) }
-    m["Heading"] = { c in AnyView(Text(c.resolved["text"]?.value.stringValue ?? "").font(.headline)) }
+    m["ScrollView"] = { c in
+        let axes: Axis.Set
+        switch c.resolved["axes"]?.value.stringValue {
+        case "horizontal": axes = .horizontal
+        case "both": axes = [.horizontal, .vertical]
+        default: axes = .vertical
+        }
+        return AnyView(ScrollView(axes) { c.children })
+    }
+    m["Text"] = { c in
+        let text = c.resolved["content"]?.value.stringValue ?? c.resolved["text"]?.value.stringValue ?? ""
+        let variant = c.resolved["variant"]?.value.stringValue ?? "body"
+        let view = Text(text)
+        switch variant {
+        case "title": return AnyView(view.font(.title))
+        case "headline": return AnyView(view.font(.headline))
+        case "caption": return AnyView(view.font(.caption))
+        case "secondary": return AnyView(view.foregroundColor(.secondary))
+        case "code": return AnyView(view.font(.system(.body, design: .monospaced)))
+        default: return AnyView(view)
+        }
+    }
+    m["Heading"] = { c in
+        let text = c.resolved["text"]?.value.stringValue ?? ""
+        let level = c.resolved["level"]?.value.intValue ?? 1
+        let view = Text(text)
+        switch level {
+        case ...1: return AnyView(view.font(.largeTitle).bold())
+        case 2: return AnyView(view.font(.title).bold())
+        case 3: return AnyView(view.font(.title2).bold())
+        case 4: return AnyView(view.font(.title3).bold())
+        default: return AnyView(view.font(.headline))
+        }
+    }
     m["Image"] = { c in
-        let src = c.resolved["src"]?.value.stringValue ?? ""
-        return AnyView(AsyncImage(url: URL(string: src)) { img in img.resizable().scaledToFit() } placeholder: { Color.gray.opacity(0.2).frame(height: 80) })
+        let source = c.resolved["src"]?.value.stringValue ?? ""
+        let alt = c.resolved["alt"]?.value.stringValue ?? ""
+        let url = URL(string: source).flatMap { candidate in
+            ["https", "http"].contains(candidate.scheme?.lowercased() ?? "") ? candidate : nil
+        }
+        return AnyView(AsyncImage(url: url) { image in
+            image.resizable().scaledToFit()
+        } placeholder: {
+            Color.gray.opacity(0.2).frame(height: 80)
+        }.accessibilityLabel(alt))
     }
     m["Divider"] = { _ in AnyView(Divider()) }
     m["Spacer"] = { _ in AnyView(Spacer()) }
     m["Badge"] = { c in AnyView(Text(c.resolved["label"]?.value.stringValue ?? "").padding(4).background(Color.accentColor.opacity(0.15)).cornerRadius(6)) }
     m["Progress"] = { c in
-        let v = c.resolved["value"]?.value.doubleValue ?? 0
-        let t = c.resolved["total"]?.value.doubleValue ?? 100
-        return AnyView(ProgressView(value: v, total: t == 0 ? 100 : t))
+        let value = c.resolved["value"]?.value.doubleValue ?? 0
+        let total = max(Double.leastNonzeroMagnitude, c.resolved["total"]?.value.doubleValue ?? 100)
+        return AnyView(ProgressView(value: min(total, max(0, value)), total: total))
     }
     m["Button"] = { c in
         let label = c.resolved["label"]?.value.stringValue ?? "Button"
-        return AnyView(Button(label) { c.emit("press") })
+        let enabled = c.resolved["enabled"]?.value.boolValue ?? true
+        return AnyView(Button(label) { c.emit("press") }.disabled(!enabled))
     }
     m["TextField"] = { c in
         let ph = c.resolved["placeholder"]?.value.stringValue ?? ""
