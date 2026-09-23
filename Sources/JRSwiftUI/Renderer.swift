@@ -6,15 +6,17 @@ import JRCore
 public struct Renderer: View {
     public var spec: Spec?
     public var registry: Registry
+    public var catalog: Catalog?
     @ObservedObject public var store: StateStore
     @ObservedObject public var dispatcher: ActionDispatcher
     public var functions: [String: @Sendable ([String: JSONValue]) -> JSONValue]
     public var loading: Bool
     public var fallback: ((String) -> AnyView)?
 
-    public init(spec: Spec?, registry: Registry, store: StateStore, dispatcher: ActionDispatcher, functions: [String: @Sendable ([String: JSONValue]) -> JSONValue] = standardFunctions, loading: Bool = false, fallback: ((String) -> AnyView)? = nil) {
+    public init(spec: Spec?, registry: Registry, store: StateStore, dispatcher: ActionDispatcher, functions: [String: @Sendable ([String: JSONValue]) -> JSONValue] = standardFunctions, loading: Bool = false, fallback: ((String) -> AnyView)? = nil, catalog: Catalog? = nil) {
         self.spec = spec
         self.registry = registry
+        self.catalog = catalog
         self.store = store
         self.dispatcher = dispatcher
         self.functions = functions
@@ -24,9 +26,31 @@ public struct Renderer: View {
 
     public var body: some View {
         Group {
-            if let spec, let root = spec.root, spec.elements[root] != nil {
-                ElementView(key: root, spec: spec, registry: registry, store: store, dispatcher: dispatcher, functions: functions, fallback: fallback, item: nil, index: nil, arrayPath: nil, arrayIndex: nil)
-                    .overlay { if loading { ProgressView().padding() } }
+            if let spec {
+                let issues = catalog?.validate(spec: spec) ?? validateSpec(spec).issues
+                if !issues.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("This spec cannot be rendered", systemImage: "exclamationmark.triangle.fill")
+                            .font(.headline)
+                            .foregroundColor(.orange)
+                        ForEach(Array(issues.prefix(5).enumerated()), id: \.offset) { entry in
+                            Text("\(entry.element.path): \(entry.element.message)")
+                                .font(.caption.monospaced())
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding()
+                } else if let root = spec.root, spec.elements[root] != nil {
+                    ElementView(key: root, spec: spec, registry: registry, store: store, dispatcher: dispatcher, functions: functions, fallback: fallback, item: nil, index: nil, arrayPath: nil, arrayIndex: nil)
+                } else if loading {
+                    VStack(spacing: 12) { ProgressView(); Text("Generating…").foregroundColor(.secondary) }.padding()
+                } else {
+                    VStack(spacing: 8) {
+                        Image(systemName: "rectangle.dashed").font(.largeTitle).foregroundColor(.secondary)
+                        Text("No UI yet — describe what you want.").foregroundColor(.secondary)
+                    }.padding()
+                }
             } else if loading {
                 VStack(spacing: 12) { ProgressView(); Text("Generating…").foregroundColor(.secondary) }.padding()
             } else {
@@ -36,6 +60,7 @@ public struct Renderer: View {
                 }.padding()
             }
         }
+        .overlay { if loading { ProgressView().padding() } }
     }
 }
 
