@@ -13,7 +13,8 @@ public func splitPointer(_ pointer: String) -> [String]? {
     guard pointer.hasPrefix("/") || pointer.isEmpty else { return nil }
     if pointer.isEmpty { return [] }
 
-    return pointer.split(separator: "/", omittingEmptySubsequences: false).dropFirst().compactMap { raw in
+    var tokens: [String] = []
+    for raw in pointer.split(separator: "/", omittingEmptySubsequences: false).dropFirst() {
         let characters = Array(raw)
         var token = ""
         var index = 0
@@ -31,12 +32,9 @@ public func splitPointer(_ pointer: String) -> [String]? {
             }
             index += 2
         }
-        return token
-    }.nilIfAnyElementMissing
-}
-
-private extension Array where Element == String {
-    var nilIfAnyElementMissing: [String]? { self }
+        tokens.append(token)
+    }
+    return tokens
 }
 
 private func arrayIndex(_ token: String, count: Int, allowEnd: Bool = false) -> Int? {
