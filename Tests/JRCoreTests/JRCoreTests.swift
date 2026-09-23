@@ -44,4 +44,47 @@ final class JRCoreTests: XCTestCase {
         s.elements["b"] = .init(type: "Text", props: [:])
         XCTAssertFalse(validateSpec(s).valid) // unreachable
     }
+
+    func testPointerEscapingAndStrictArrayIndices() {
+        let value: JSONValue = .object(["a/b~c": .array([.string("first"), .string("second")])])
+        XCTAssertEqual(getByPath(value, "/a~1b~0c/1"), .string("second"))
+        XCTAssertNil(getByPath(value, "/a~1b~0c/01"))
+        XCTAssertNil(getByPath(value, "/a~1b~2c"))
+    }
+
+    func testJSONPatchUsesRFC6902ArrayAndFailureSemantics() {
+        var value: JSONValue = .object(["items": .array([.string("a"), .string("c")])])
+        XCTAssertTrue(applyJSONPatch(&value, .init(op: "add", path: "/items/1", value: .string("b"), from: nil)))
+        XCTAssertEqual(getByPath(value, "/items"), .array([.string("a"), .string("b"), .string("c")]))
+
+        XCTAssertTrue(applyJSONPatch(&value, .init(op: "move", path: "/items/0", value: nil, from: "/items/2")))
+        XCTAssertEqual(getByPath(value, "/items"), .array([.string("c"), .string("a"), .string("b")]))
+
+        let before = value
+        XCTAssertFalse(applyJSONPatch(&value, .init(op: "add", path: "/missing/child", value: .bool(true), from: nil)))
+        XCTAssertEqual(value, before)
+    }
+
+    func testDiffEscapesPointerKeysAndRoundTrips() {
+        let old: JSONValue = .object(["a/b~c": .string("old")])
+        let new: JSONValue = .object(["a/b~c": .string("new")])
+        let patches = diffToPatches(old: old, new: new)
+        XCTAssertEqual(patches.first?.path, "/a~1b~0c")
+        var result = old
+        for patch in patches { XCTAssertTrue(applyJSONPatch(&result, patch)) }
+        XCTAssertEqual(result, new)
+    }
+
+    func testValidationRejectsSharedChildren() {
+        let spec = Spec(
+            root: "root",
+            elements: [
+                "root": .init(type: "VStack", children: ["leaf", "leaf"]),
+                "leaf": .init(type: "Text", props: ["content": .string("hi")]),
+            ]
+        )
+        XCTAssertFalse(validateSpec(spec).valid)
+        XCTAssertTrue(validateSpec(spec).issues.contains { $0.message.contains("more than once") })
+    }
+
 }

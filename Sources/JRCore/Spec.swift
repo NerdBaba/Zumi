@@ -329,7 +329,10 @@ public func validateSpec(_ spec: Spec) -> (valid: Bool, issues: [SpecIssue]) {
     func dfs(_ key: String) {
         if stack.contains(key) { issues.append(.init(path: "/elements/\(key)", message: "Cycle detected")); return }
         guard let el = spec.elements[key] else { issues.append(.init(path: "/elements/\(key)", message: "Dangling reference")); return }
-        if visited.contains(key) { return } // shared children: warn, don't fail hard (Jev rejects, renderer warns)
+        if visited.contains(key) {
+            issues.append(.init(path: "/elements/\(key)", message: "Element is referenced more than once"))
+            return
+        }
         visited.insert(key); stack.insert(key)
         for child in (el.children ?? []) { dfs(child) }
         for (_, arr) in (el.slots ?? [:]) { for k in arr { dfs(k) } }

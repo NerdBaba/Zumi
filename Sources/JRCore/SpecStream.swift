@@ -35,28 +35,38 @@ public func applySpecPatch(_ spec: inout Spec, _ patch: SpecPatch) -> Bool {
 }
 
 func applyJSONPatch(_ root: inout JSONValue, _ patch: SpecPatch) -> Bool {
+    var candidate = root
+    guard applyJSONPatchInPlace(&candidate, patch) else { return false }
+    root = candidate
+    return true
+}
+
+private func applyJSONPatchInPlace(_ root: inout JSONValue, _ patch: SpecPatch) -> Bool {
     switch patch.op {
-    case "add", "replace":
-        guard let v = patch.value else { return false }
-        if patch.op == "add" {
-            // add creates or replaces for objects (json-render semantics)
-            return setByPath(&root, patch.path, v)
-        } else {
-            guard getByPath(root, patch.path) != nil else { return false }
-            return setByPath(&root, patch.path, v)
-        }
+    case "add":
+        guard let value = patch.value else { return false }
+        return addByPath(&root, patch.path, value)
+    case "replace":
+        guard let value = patch.value, getByPath(root, patch.path) != nil else { return false }
+        return setByPath(&root, patch.path, value)
     case "remove":
         return removeByPath(&root, patch.path)
     case "move":
-        guard let from = patch.from, let v = getByPath(root, from) else { return false }
+        guard let from = patch.from,
+              let sourceTokens = splitPointer(from),
+              let destinationTokens = splitPointer(patch.path),
+              let value = getByPath(root, from) else { return false }
+        if sourceTokens == destinationTokens { return true }
+        guard !(destinationTokens.count > sourceTokens.count
+                && destinationTokens.starts(with: sourceTokens)) else { return false }
         guard removeByPath(&root, from) else { return false }
-        return setByPath(&root, patch.path, v)
+        return addByPath(&root, patch.path, value)
     case "copy":
-        guard let from = patch.from, let v = getByPath(root, from) else { return false }
-        return setByPath(&root, patch.path, v)
+        guard let from = patch.from, let value = getByPath(root, from) else { return false }
+        return addByPath(&root, patch.path, value)
     case "test":
-        guard let v = patch.value else { return false }
-        return getByPath(root, patch.path) == v
+        guard let value = patch.value else { return false }
+        return getByPath(root, patch.path) == value
     default:
         return false
     }
@@ -122,13 +132,14 @@ public func diffToPatches(old: JSONValue, new: JSONValue, basePath: String = "")
             patches.append(.init(op: "remove", path: "\(basePath)/\(k)", value: nil, from: nil))
         }
         for (k, v) in n {
-            let p = "\(basePath)/\(k)"
+            let escapedKey = k.replacingOccurrences(of: "~", with: "~0").replacingOccurrences(of: "/", with: "~1")
+            let p = "\(basePath)/\(escapedKey)"
             if let ov = o[k] { patches += diffToPatches(old: ov, new: v, basePath: p) }
             else { patches.append(.init(op: "add", path: p, value: v, from: nil)) }
         }
         return patches
     case (.array, .array):
-        return [.init(op: "replace", path: basePath.isEmpty ? "/" : basePath, value: new, from: nil)]
+        return [.init(op: "replace", path: basePath, value: new, from: nil)]
     default:
         return [.init(op: "replace", path: basePath.isEmpty ? "/" : basePath, value: new, from: nil)]
     }
