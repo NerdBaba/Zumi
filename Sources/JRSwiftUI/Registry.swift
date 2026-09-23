@@ -33,8 +33,9 @@ public final class ActionDispatcher: ObservableObject {
     public typealias Handler = ([String: JSONValue], @escaping (String, JSONValue) -> Void, [String: JSONValue]) async throws -> Void
 
     public var handlers: [String: Handler]
-    public var timeline: [(name: String, params: [String: JSONValue], error: String?)] = []
+    @Published public private(set) var timeline: [(name: String, params: [String: JSONValue], error: String?)] = []
     public weak var store: StateStore?
+    public var formValidator: (([String: JSONValue]) -> Bool)?
 
     public init(handlers: [String: Handler] = [:]) {
         self.handlers = handlers
@@ -75,10 +76,10 @@ public final class ActionDispatcher: ObservableObject {
             timeline.insert((binding.action, params, nil), at: 0)
             return
         case "validateForm":
-            NotificationCenter.default.post(
-                name: .jrValidateForm,
-                object: params["statePath"]?.stringValue ?? "/formValidation"
-            )
+            let valid = formValidator?(store?.state ?? ctx.state) ?? false
+            let path = params["statePath"]?.stringValue ?? "/formValidation"
+            store?.set(path, .object(["valid": .bool(valid)]))
+            NotificationCenter.default.post(name: .jrValidateForm, object: valid)
             apply(binding.onSuccess, ctx: ctx)
             timeline.insert((binding.action, params, nil), at: 0)
             return
