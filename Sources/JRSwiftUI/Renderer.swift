@@ -104,9 +104,10 @@ struct ElementView: View {
             return AnyView(Text("Unknown: \(el.type)").foregroundColor(.red).font(.caption))
         }
         let emit: (String) -> Void = { event in
-            if let bindings = el.on?[event] {
-                for b in bindings.all {
-                    Task { @MainActor in await dispatcher.execute(b, ctx: ctx) }
+            guard let bindings = el.on?[event] else { return }
+            Task { @MainActor in
+                for binding in bindings.all {
+                    await dispatcher.execute(binding, ctx: ctx)
                 }
             }
         }
