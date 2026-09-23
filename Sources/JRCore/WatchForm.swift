@@ -2,16 +2,22 @@ import Foundation
 
 // MARK: - Watchers: fire actions when watched paths change (any source)
 
-/// Returns watch bindings whose path matches one of the changed paths.
+/// Returns watch bindings whose path is touched by a changed pointer.
 public func matchingWatches(spec: Spec, changedPaths: [String]) -> [(element: UIElement, path: String, bindings: [ActionBinding])] {
     var out: [(UIElement, String, [ActionBinding])] = []
     for el in spec.elements.values {
         guard let watch = el.watch else { continue }
-        for (path, binding) in watch where changedPaths.contains(path) {
+        for (path, binding) in watch where changedPaths.contains(where: { pointersOverlap(path, $0) }) {
             out.append((el, path, binding.all))
         }
     }
     return out
+}
+
+private func pointersOverlap(_ lhs: String, _ rhs: String) -> Bool {
+    guard let left = splitPointer(lhs), let right = splitPointer(rhs) else { return false }
+    let sharedCount = min(left.count, right.count)
+    return Array(left.prefix(sharedCount)) == Array(right.prefix(sharedCount))
 }
 
 /// Form-level validation aggregation: all elements with `checks` must pass.

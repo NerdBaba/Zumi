@@ -87,4 +87,37 @@ final class JRCoreTests: XCTestCase {
         XCTAssertTrue(validateSpec(spec).issues.contains { $0.message.contains("more than once") })
     }
 
+
+    func testCatalogRejectsUnknownPropsAndActions() {
+        let catalog = zumiStandardCatalog()
+        let spec = Spec(
+            root: "button",
+            elements: [
+                "button": .init(
+                    type: "Button",
+                    props: ["label": .string("Go"), "unsafe": .string("ignored")],
+                    on: ["press": .single(.init(action: "runCode"))]
+                )
+            ]
+        )
+        let issues = catalog.validate(spec: spec)
+        XCTAssertTrue(issues.contains { $0.message.contains("Unknown prop 'unsafe'") })
+        XCTAssertTrue(issues.contains { $0.message.contains("Unknown action 'runCode'") })
+    }
+
+    func testWatchesMatchParentAndChildPointers() {
+        let binding = ActionBinding(action: "submit")
+        let spec = Spec(
+            root: "field",
+            elements: [
+                "field": .init(type: "Text", props: ["content": .string("x")], watch: [
+                    "/user": .single(binding),
+                    "/user/name": .single(binding),
+                ]),
+            ]
+        )
+        XCTAssertEqual(matchingWatches(spec: spec, changedPaths: ["/user/name"]).count, 2)
+        XCTAssertEqual(matchingWatches(spec: spec, changedPaths: ["/user"]).count, 2)
+        XCTAssertTrue(matchingWatches(spec: spec, changedPaths: ["/other"]).isEmpty)
+    }
 }

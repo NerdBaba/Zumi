@@ -48,6 +48,10 @@ public struct Catalog: Sendable {
                 issues.append(.init(path: "/elements/\(key)/type", message: "Unknown component '\(el.type)'"))
                 continue
             }
+            // Props form a closed vocabulary so generated specs cannot silently drift.
+            for prop in el.props.keys.sorted() where !def.propNames.contains(prop) {
+                issues.append(.init(path: "/elements/\(key)/props/\(prop)", message: "Unknown prop '\(prop)' for '\(el.type)'"))
+            }
             // slots
             for slot in (el.slots ?? [:]).keys where !def.slots.contains(slot) && slot != "default" {
                 issues.append(.init(path: "/elements/\(key)/slots/\(slot)", message: "Unknown slot '\(slot)' for '\(el.type)'"))
@@ -81,6 +85,9 @@ public struct Catalog: Sendable {
         lines.append(mode == .standalone
             ? "Output ONLY JSONL patches (RFC6902), one per line. No prose."
             : "Respond conversationally, then JSONL patches on their own lines when UI is needed. Text-only replies allowed.")
+        lines.append("Spec shape: {root: elementId, elements: {elementId: {type, props, children?, slots?, visible?, on?, repeat?, watch?}}}.")
+        lines.append("Start with an add patch for /root, then add each referenced element at /elements/<id>. Use unique ids; every child and slot id must exist exactly once.")
+        lines.append("Use only listed components and props. Keep the tree acyclic and fully reachable. Encode every patch as one valid JSON object on its own line.")
         lines.append("Components:")
         for name in componentNames {
             let d = components[name]!
@@ -147,15 +154,15 @@ public func zumiStandardCatalog() -> Catalog {
             "Spacer": .init(description: "Spacer", propNames: ["minLength"]),
             "Badge": .init(description: "Badge", propNames: ["label"], validateProps: { reqProps($0, ["label"]) }),
             "Progress": .init(description: "Progress", propNames: ["value", "total"]),
-            "Button": .init(description: "Button", events: ["press"], propNames: ["label", "variant"], validateProps: { reqProps($0, ["label"]) }),
-            "TextField": .init(description: "Text input", events: ["change", "blur", "submit"], propNames: ["value", "placeholder", "label", "checks", "validateOn"]),
-            "SecureField": .init(description: "Password input", events: ["change", "blur"], propNames: ["value", "placeholder", "label", "checks"]),
-            "TextArea": .init(description: "Multiline input", events: ["change"], propNames: ["value", "placeholder", "label"]),
-            "Toggle": .init(description: "Toggle switch", events: ["change"], propNames: ["checked", "label"]),
-            "Checkbox": .init(description: "Checkbox", events: ["change"], propNames: ["checked", "label"]),
-            "Slider": .init(description: "Slider", events: ["change"], propNames: ["value", "min", "max"]),
-            "Picker": .init(description: "Picker", events: ["change"], propNames: ["value", "options", "label"]),
-            "DatePicker": .init(description: "Date picker", events: ["change"], propNames: ["value", "label"]),
+            "Button": .init(description: "Button", events: ["press"], propNames: ["label", "variant", "enabled"], validateProps: { reqProps($0, ["label"]) }),
+            "TextField": .init(description: "Text input", events: ["change", "blur", "submit"], propNames: ["value", "placeholder", "label", "checks", "validateOn", "enabled"]),
+            "SecureField": .init(description: "Password input", events: ["change", "blur"], propNames: ["value", "placeholder", "label", "checks", "enabled"]),
+            "TextArea": .init(description: "Multiline input", events: ["change"], propNames: ["value", "placeholder", "label", "checks", "validateOn", "enabled"]),
+            "Toggle": .init(description: "Toggle switch", events: ["change"], propNames: ["checked", "label", "checks", "enabled"]),
+            "Checkbox": .init(description: "Checkbox", events: ["change"], propNames: ["checked", "label", "checks", "enabled"]),
+            "Slider": .init(description: "Slider", events: ["change"], propNames: ["value", "min", "max", "enabled"]),
+            "Picker": .init(description: "Picker", events: ["change"], propNames: ["value", "options", "label", "enabled"]),
+            "DatePicker": .init(description: "Date picker", events: ["change"], propNames: ["value", "label", "enabled"]),
         ],
         actions: [
             "submit": .init(description: "Submit form", paramNames: ["formId"]),

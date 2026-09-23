@@ -16,40 +16,51 @@ public final class StateStore: ObservableObject {
     public func get(_ path: String) -> JSONValue? { getByPath(state, path) }
 
     public func set(_ path: String, _ value: JSONValue) {
-        var root = JSONValue.object(state)
-        if path.hasPrefix("$item:") {
-            // $bindItem writes are handled by parent repeat scope via updateItem; ignore direct
-            return
-        }
-        guard setByPath(&root, path, value) else {
-            // Create intermediate objects for new paths
-            let tokens = splitPointer(path) ?? []
-            if !tokens.isEmpty {
-                var cur: [String: JSONValue] = state
-                // naive deep create
-                func insert(_ dict: inout [String: JSONValue], _ toks: [String]) {
-                    if toks.count == 1 { dict[toks[0]] = value; return }
-                    var child = dict[toks[0]]?.objectValue ?? [:]
-                    insert(&child, Array(toks.dropFirst()))
-                    dict[toks[0]] = .object(child)
-                }
-                insert(&cur, tokens)
-                state = cur
-                onStateChange?([(path, value)])
-                return
-            }
-            return
-        }
-        if case let .object(o) = root { state = o }
+        guard !path.hasPrefix("$item:"), get(path) != value else { return }
+        guard write(path, value) else { return }
         onStateChange?([(path, value)])
     }
 
     public func update(_ updates: [String: JSONValue]) {
-        for (k, v) in updates {
-            // keys may be paths or plain keys
-            if k.hasPrefix("/") { set(k, v) } else { state[k] = v }
+        var changes: [(path: String, value: JSONValue)] = []
+        for (path, value) in updates {
+            let previous = path.hasPrefix("/") ? get(path) : state[path]
+            guard previous != value else { continue }
+            let succeeded: Bool
+            if path.hasPrefix("/") {
+                succeeded = write(path, value)
+            } else {
+                state[path] = value
+                succeeded = true
+            }
+            if succeeded { changes.append((path, value)) }
         }
-        onStateChange?(updates.map { ($0.key, $0.value) })
+        if !changes.isEmpty { onStateChange?(changes) }
+    }
+
+    private func write(_ path: String, _ value: JSONValue) -> Bool {
+        var root = JSONValue.object(state)
+        if setByPath(&root, path, value), case let .object(object) = root {
+            state = object
+            return true
+        }
+
+        // Create missing object parents for newly introduced state paths.
+        guard let tokens = splitPointer(path), !tokens.isEmpty else { return false }
+        var updated = state
+        func insert(_ object: inout [String: JSONValue], _ remaining: ArraySlice<String>) {
+            guard let first = remaining.first else { return }
+            if remaining.count == 1 {
+                object[first] = value
+                return
+            }
+            var child = object[first]?.objectValue ?? [:]
+            insert(&child, remaining.dropFirst())
+            object[first] = .object(child)
+        }
+        insert(&updated, tokens[...])
+        state = updated
+        return true
     }
 
     public func remove(_ path: String) {
