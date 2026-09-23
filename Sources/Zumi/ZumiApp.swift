@@ -176,19 +176,19 @@ struct ContentView: View {
                 status = "Generating the local demo…"
                 var demo = Spec()
                 let lines = [
-                    #"{\"op\":\"add\",\"path\":\"/root\",\"value\":\"root\"}"#,
-                    #"{\"op\":\"add\",\"path\":\"/elements/root\",\"value\":{\"type\":\"VStack\",\"props\":{},\"children\":[\"hello\",\"list\",\"form\",\"adv\"]}}"#,
-                    #"{\"op\":\"add\",\"path\":\"/elements/hello\",\"value\":{\"type\":\"Text\",\"props\":{\"content\":{\"$template\":\"Hello ${/user/name}! You have 2 todos.\"}}}}"#,
-                    #"{\"op\":\"add\",\"path\":\"/elements/list\",\"value\":{\"type\":\"VStack\",\"props\":{},\"repeat\":{\"statePath\":\"/todos\",\"key\":\"id\"},\"children\":[\"row\"]}}"#,
-                    #"{\"op\":\"add\",\"path\":\"/elements/row\",\"value\":{\"type\":\"HStack\",\"props\":{},\"children\":[\"t\",\"done\"]}}"#,
-                    #"{\"op\":\"add\",\"path\":\"/elements/t\",\"value\":{\"type\":\"Text\",\"props\":{\"content\":{\"$item\":\"title\"}}}}"#,
-                    #"{\"op\":\"add\",\"path\":\"/elements/done\",\"value\":{\"type\":\"Toggle\",\"props\":{\"label\":\"Done\",\"checked\":{\"$bindItem\":\"done\"}}}}"#,
-                    #"{\"op\":\"add\",\"path\":\"/elements/form\",\"value\":{\"type\":\"Card\",\"props\":{\"title\":\"Signup\"},\"children\":[\"email\",\"err\",\"country\",\"go\"]}}"#,
-                    #"{\"op\":\"add\",\"path\":\"/elements/email\",\"value\":{\"type\":\"TextField\",\"props\":{\"label\":\"Email\",\"value\":{\"$bindState\":\"/form/email\"},\"placeholder\":\"you@acme.com\",\"checks\":[{\"type\":\"required\",\"message\":\"Email required\"},{\"type\":\"email\",\"message\":\"Invalid email\"}]}}}"#,
-                    #"{\"op\":\"add\",\"path\":\"/elements/err\",\"value\":{\"type\":\"Text\",\"props\":{\"content\":\"Fix email to continue\"},\"visible\":{\"$state\":\"/form/email\",\"eq\":\"\"}}}"#,
-                    #"{\"op\":\"add\",\"path\":\"/elements/country\",\"value\":{\"type\":\"Picker\",\"props\":{\"label\":\"Country\",\"value\":{\"$bindState\":\"/form/country\"},\"options\":[\"US\",\"UK\"]},\"watch\":{\"/form/country\":{\"action\":\"loadCities\",\"params\":{\"country\":{\"$state\":\"/form/country\"}}}}}}"#,
-                    #"{\"op\":\"add\",\"path\":\"/elements/go\",\"value\":{\"type\":\"Button\",\"props\":{\"label\":\"Submit\"},\"on\":{\"press\":[{\"action\":\"validateForm\",\"params\":{\"statePath\":\"/formResult\"}},{\"action\":\"submit\",\"params\":{}}]}}}"#,
-                    #"{\"op\":\"add\",\"path\":\"/elements/adv\",\"value\":{\"type\":\"Text\",\"props\":{\"content\":\"Advanced on\"},\"visible\":{\"$state\":\"/showAdvanced\"}}}"#,
+                    #"{"op":"add","path":"/root","value":"root"}"#,
+                    #"{"op":"add","path":"/elements/root","value":{"type":"VStack","props":{},"children":["hello","list","form","adv"]}}"#,
+                    #"{"op":"add","path":"/elements/hello","value":{"type":"Text","props":{"content":{"$template":"Hello ${/user/name}! You have 2 todos."}}}}"#,
+                    #"{"op":"add","path":"/elements/list","value":{"type":"VStack","props":{},"repeat":{"statePath":"/todos","key":"id"},"children":["row"]}}"#,
+                    #"{"op":"add","path":"/elements/row","value":{"type":"HStack","props":{},"children":["t","done"]}}"#,
+                    #"{"op":"add","path":"/elements/t","value":{"type":"Text","props":{"content":{"$item":"title"}}}}"#,
+                    #"{"op":"add","path":"/elements/done","value":{"type":"Toggle","props":{"label":"Done","checked":{"$bindItem":"done"}}}}"#,
+                    #"{"op":"add","path":"/elements/form","value":{"type":"Card","props":{"title":"Signup"},"children":["email","err","country","go"]}}"#,
+                    #"{"op":"add","path":"/elements/email","value":{"type":"TextField","props":{"label":"Email","value":{"$bindState":"/form/email"},"placeholder":"you@acme.com","checks":[{"type":"required","message":"Email required"},{"type":"email","message":"Invalid email"}]}}}"#,
+                    #"{"op":"add","path":"/elements/err","value":{"type":"Text","props":{"content":"Fix email to continue"},"visible":{"$state":"/form/email","eq":""}}}"#,
+                    #"{"op":"add","path":"/elements/country","value":{"type":"Picker","props":{"label":"Country","value":{"$bindState":"/form/country"},"options":["US","UK"]},"watch":{"/form/country":{"action":"loadCities","params":{"country":{"$state":"/form/country"}}}}}}"#,
+                    #"{"op":"add","path":"/elements/go","value":{"type":"Button","props":{"label":"Submit"},"on":{"press":[{"action":"validateForm","params":{"statePath":"/formResult"}},{"action":"submit","params":{}}]}}}"#,
+                    #"{"op":"add","path":"/elements/adv","value":{"type":"Text","props":{"content":"Advanced on"},"visible":{"$state":"/showAdvanced"}}}"#,
                 ]
 
                 for line in lines {
@@ -212,7 +212,7 @@ struct ContentView: View {
                     .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                 guard !key.isEmpty else {
                     status = "Set OPENAI_API_KEY to use OpenAI mode"
-                    return
+                    break
                 }
                 status = "Streaming from OpenAI…"
                 let client = OpenAIStreamClient(config: .init(apiKey: key))
@@ -222,13 +222,13 @@ struct ContentView: View {
                     Task { @MainActor in
                         guard id == generationID else { return }
                         streamLog.append(line)
-                        if catalog.validate(spec: candidate).isEmpty { spec = candidate }
+                        if isNonEmptySpec(candidate), catalog.validate(spec: candidate).isEmpty { spec = candidate }
                     }
                 }
                 try Task.checkCancellation()
                 let issues = catalog.validate(spec: output)
                 guard id == generationID else { return }
-                if issues.isEmpty {
+                if isNonEmptySpec(output), issues.isEmpty {
                     spec = output
                     status = "Done — UI validated"
                 } else {
@@ -243,7 +243,7 @@ struct ContentView: View {
                       ["https", "http"].contains(baseURL.scheme?.lowercased() ?? ""),
                       baseURL.host != nil else {
                     status = "Configure JEV_API_KEY and JEV_API_URL to use Jev mode"
-                    return
+                    break
                 }
                 status = "Requesting a Jev snapshot…"
                 let client = JevClient(config: .init(apiKey: key, baseURL: baseURL))
@@ -256,7 +256,7 @@ struct ContentView: View {
                 ) { snapshot in
                     Task { @MainActor in
                         guard id == generationID else { return }
-                        if catalog.validate(spec: snapshot).isEmpty {
+                        if isNonEmptySpec(snapshot), catalog.validate(spec: snapshot).isEmpty {
                             spec = snapshot
                             streamLog.append("Jev snapshot replaced the current spec")
                         }
@@ -266,7 +266,7 @@ struct ContentView: View {
                 guard id == generationID else { return }
                 switch result.stop {
                 case .finish:
-                    if let snapshot = result.spec, catalog.validate(spec: snapshot).isEmpty {
+                    if let snapshot = result.spec, isNonEmptySpec(snapshot), catalog.validate(spec: snapshot).isEmpty {
                         spec = snapshot
                         status = "Jev finished — snapshot validated"
                     } else {
