@@ -205,7 +205,7 @@ struct ContentView: View {
                 guard id == generationID else { return }
                 status = issues.isEmpty
                     ? "Demo ready — repeat, visibility, validation, watches, and templates are active"
-                    : "Demo rejected — \\(issues.first?.message ?? "invalid spec")"
+                    : "Demo rejected — \(issues.first?.message ?? "invalid spec")"
 
             case "openai":
                 let key = ProcessInfo.processInfo.environment["OPENAI_API_KEY"]?
@@ -232,7 +232,7 @@ struct ContentView: View {
                     spec = output
                     status = "Done — UI validated"
                 } else {
-                    status = "Received an invalid spec — kept the last valid UI: \\(issues[0].message)"
+                    status = "Received an invalid spec — kept the last valid UI: \(issues[0].message)"
                 }
 
             case "jev":
@@ -286,7 +286,7 @@ struct ContentView: View {
             status = "Stopped — kept the last valid spec"
         } catch {
             guard id == generationID else { return }
-            status = "Error: \\(error.localizedDescription) — kept the last valid spec"
+            status = "Error: \(error.localizedDescription) — kept the last valid spec"
         }
 
         guard id == generationID else { return }
